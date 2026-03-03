@@ -10,6 +10,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import inch
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+import ddddocr as ocr_lib
 
 
 def scrape_rd_table(page):
@@ -106,6 +107,12 @@ def login_with_local_captcha():
         captcha_element.screenshot(path="captcha.png")
         print("CAPTCHA image saved locally as 'captcha.png'")
 
+        ocr = ocr_lib.DdddOcr(show_ad=False)
+        with open("captcha.png", "rb") as f:
+            img_bytes = f.read()
+            captcha_code = ocr.classification(img_bytes)
+            print(f"Decoded CAPTCHA code: {captcha_code}")
+
         # 3. Fill in the credentials
         page.fill(
             "input[name='AuthenticationFG.USER_PRINCIPAL']",
@@ -117,7 +124,7 @@ def login_with_local_captcha():
         )
 
         # 4. Prompt for input (you can now open the local file to see it)
-        captcha_code = input("Open 'captcha.png' and enter the code here: ")
+        # captcha_code = input("Open 'captcha.png' and enter the code here: ")
         page.fill("input[name='AuthenticationFG.VERIFICATION_CODE']", captcha_code)
 
         # 5. Submit

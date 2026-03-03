@@ -4,3 +4,4 @@ playwright==1.41.0
 pandas==2.1.4
 reportlab==4.0.7
 python-dateutil==2.8.2
+ddddocr==1.5.6
