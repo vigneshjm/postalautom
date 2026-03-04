@@ -43,19 +43,20 @@ RUN playwright install chromium
 RUN playwright install-deps chromium || true
 
 # Copy application files
-COPY loginPlawright.py .
-COPY login.py .
-COPY README.md .
+COPY main.py .
 
 # Modify the script to use Playwright's Chromium instead of system Chrome in Docker
-RUN sed -i 's/channel="chrome"//' loginPlawright.py
+RUN sed -i 's/channel="chrome"//' main.py
 
 # Create directory for output files
 RUN mkdir -p /app/output
 
 # Set environment variables (override these when running the container)
-ENV INDIA_POST_USER=""
-ENV INDIA_POST_PASS=""
+ENV INDIA_POST_USER="DOP.MIG0017258"
+ENV INDIA_POST_PASS="BaskaranJamuna@73"
 
-# Run the script
-CMD ["python", "loginPlawright.py"]
+# Expose FastAPI port
+EXPOSE 8000
+
+# Run the FastAPI application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
