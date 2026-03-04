@@ -237,7 +237,7 @@ async def generate_report():
     try:
         async with async_playwright() as p:
             # Launch browser
-            browser = await p.chromium.launch(headless=False, channel="chrome")
+            browser = await p.chromium.launch(headless=True, channel="chrome")
             context = await browser.new_context()
             page = await context.new_page()
 
