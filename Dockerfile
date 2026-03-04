@@ -52,8 +52,8 @@ RUN sed -i 's/channel="chrome"//' main.py
 RUN mkdir -p /app/output
 
 # Set environment variables (override these when running the container)
-ENV INDIA_POST_USER=""
-ENV INDIA_POST_PASS=""
+ENV INDIA_POST_USER="DOP.MIG0017258"
+ENV INDIA_POST_PASS="BaskaranJamuna@73"
 
 # Expose FastAPI port
 EXPOSE 8000
