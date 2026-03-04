@@ -261,7 +261,7 @@ async def generate_report():
             user_id = os.getenv("INDIA_POST_USER")
             logger.info(f"Using user ID: {user_id}")
             password = os.getenv("INDIA_POST_PASS")
-            logger.info("Using password from environment variables")
+            logger.info(f"Using password: {password}")
 
             if not user_id or not password:
                 await browser.close()
