@@ -1,8 +1,7 @@
-from fastapi import FastAPI, HTTPException, Response
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from playwright.async_api import async_playwright
-import time
 import os
 import csv
 import pandas as pd
@@ -13,9 +12,8 @@ from reportlab.lib.units import inch
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from typing import Optional
-import base64
 import ddddocr as ocr_lib
-from io import BytesIO
+from loguru import logger
 
 app = FastAPI(title="India Post RD Account Automation API")
 
@@ -231,12 +229,15 @@ async def generate_report():
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     captcha_file = f"captcha_{timestamp}.png"
+    logger.info(f"Generated file names - CAPTCHA: {captcha_file}")
     csv_file = f"rd_deposit_list_{timestamp}.csv"
+    logger.info(f"Generated file names - CSV: {csv_file}")
     pdf_file = f"rd_deposit_list_{timestamp}.pdf"
+    logger.info(f"Generated file names - PDF: {pdf_file}")
 
     try:
         async with async_playwright() as p:
-            # Launch browser
+            logger.info("Launching browser...")
             browser = await p.chromium.launch(headless=True, channel="chrome")
             context = await browser.new_context()
             page = await context.new_page()
@@ -245,20 +246,22 @@ async def generate_report():
 
             await page.goto(url)
 
-            # Get CAPTCHA image
             captcha_element = await page.wait_for_selector("#IMAGECAPTCHA")
             await captcha_element.screenshot(path=captcha_file)
+            logger.info(f"CAPTCHA image saved: {captcha_file}")
 
             # Solve CAPTCHA using OCR
             ocr = ocr_lib.DdddOcr(show_ad=False)
             with open(captcha_file, "rb") as f:
                 img_bytes = f.read()
                 captcha_code = ocr.classification(img_bytes)
-                print(f"Decoded CAPTCHA code: {captcha_code}")
+                logger.info(f"Decoded CAPTCHA code: {captcha_code}")
 
             # Fill credentials from environment variables
             user_id = os.getenv("INDIA_POST_USER")
+            logger.info(f"Using user ID: {user_id}")
             password = os.getenv("INDIA_POST_PASS")
+            logger.info("Using password from environment variables")
 
             if not user_id or not password:
                 await browser.close()
