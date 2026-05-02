@@ -14,6 +14,8 @@ from dateutil.relativedelta import relativedelta
 from typing import Optional
 import ddddocr as ocr_lib
 from loguru import logger
+from PIL import Image
+import pytesseract
 
 app = FastAPI(title="India Post RD Account Automation API")
 
@@ -238,7 +240,7 @@ async def generate_report():
     try:
         async with async_playwright() as p:
             logger.info("Launching browser...")
-            browser = await p.chromium.launch(headless=True, channel="chrome")
+            browser = await p.chromium.launch(headless=False, channel="chrome")
             context = await browser.new_context()
             page = await context.new_page()
 
@@ -251,11 +253,16 @@ async def generate_report():
             logger.info(f"CAPTCHA image saved: {captcha_file}")
 
             # Solve CAPTCHA using OCR
-            ocr = ocr_lib.DdddOcr(show_ad=False)
-            with open(captcha_file, "rb") as f:
-                img_bytes = f.read()
-                captcha_code = ocr.classification(img_bytes)
-                logger.info(f"Decoded CAPTCHA code: {captcha_code}")
+            pytesseract.pytesseract.tesseract_cmd = (
+                r"/opt/homebrew/Cellar/tesseract/5.5.2/bin/tesseract"
+            )
+            img = Image.open(captcha_file)
+            captcha_code = pytesseract.image_to_string(img).strip()
+            # ocr = ocr_lib.DdddOcr(show_ad=False)
+            # with open(captcha_file, "rb") as f:
+            #     img_bytes = f.read()
+            #     captcha_code = ocr.classification(img_bytes)
+            logger.info(f"Decoded CAPTCHA code: {captcha_code}")
 
             # Fill credentials from environment variables
             user_id = os.getenv("INDIA_POST_USER")
@@ -288,7 +295,7 @@ async def generate_report():
                 # Clean up files
                 for f in [captcha_file, csv_file, pdf_file]:
                     if os.path.exists(f):
-                        os.remove(f)
+                        pass
                 raise HTTPException(
                     status_code=401,
                     detail="Login failed - check credentials or CAPTCHA",
