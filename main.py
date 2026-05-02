@@ -12,10 +12,14 @@ from reportlab.lib.units import inch
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from typing import Optional
-import ddddocr as ocr_lib
 from loguru import logger
-from PIL import Image
-import pytesseract
+from telegram_captcha import (
+    send_captcha_image,
+    wait_for_captcha_reply,
+    send_report,
+    send_message,
+    poll_for_commands,
+)
 
 app = FastAPI(title="India Post RD Account Automation API")
 
@@ -222,25 +226,21 @@ async def root():
     }
 
 
-@app.get("/generate-report")
-async def generate_report():
-    """
-    Generate RD account report with automatic CAPTCHA solving.
-
-    Returns PDF report directly.
-    """
+async def _run_report_generation() -> str:
+    """Core report generation logic. Returns the path to the generated PDF."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     captcha_file = f"captcha_{timestamp}.png"
-    logger.info(f"Generated file names - CAPTCHA: {captcha_file}")
     csv_file = f"rd_deposit_list_{timestamp}.csv"
-    logger.info(f"Generated file names - CSV: {csv_file}")
     pdf_file = f"rd_deposit_list_{timestamp}.pdf"
-    logger.info(f"Generated file names - PDF: {pdf_file}")
 
     try:
         async with async_playwright() as p:
             logger.info("Launching browser...")
-            browser = await p.chromium.launch(headless=False, channel="chrome")
+            headless = os.getenv("HEADLESS", "true").lower() == "true"
+            launch_args = {"headless": headless}
+            if not headless:
+                launch_args["channel"] = "chrome"
+            browser = await p.chromium.launch(**launch_args)
             context = await browser.new_context()
             page = await context.new_page()
 
@@ -252,29 +252,19 @@ async def generate_report():
             await captcha_element.screenshot(path=captcha_file)
             logger.info(f"CAPTCHA image saved: {captcha_file}")
 
-            # Solve CAPTCHA using OCR
-            pytesseract.pytesseract.tesseract_cmd = (
-                r"/opt/homebrew/Cellar/tesseract/5.5.2/bin/tesseract"
-            )
-            img = Image.open(captcha_file)
-            captcha_code = pytesseract.image_to_string(img).strip()
-            # ocr = ocr_lib.DdddOcr(show_ad=False)
-            # with open(captcha_file, "rb") as f:
-            #     img_bytes = f.read()
-            #     captcha_code = ocr.classification(img_bytes)
-            logger.info(f"Decoded CAPTCHA code: {captcha_code}")
+            # Send CAPTCHA to Telegram and wait for user reply
+            message_id = await send_captcha_image(captcha_file)
+            captcha_code = await wait_for_captcha_reply(message_id, timeout=120)
+            logger.info(f"Received CAPTCHA code: {captcha_code}")
 
             # Fill credentials from environment variables
             user_id = os.getenv("INDIA_POST_USER")
-            logger.info(f"Using user ID: {user_id}")
             password = os.getenv("INDIA_POST_PASS")
-            logger.info(f"Using password: {password}")
 
             if not user_id or not password:
                 await browser.close()
-                raise HTTPException(
-                    status_code=400,
-                    detail="Environment variables INDIA_POST_USER and INDIA_POST_PASS must be set",
+                raise RuntimeError(
+                    "Environment variables INDIA_POST_USER and INDIA_POST_PASS must be set"
                 )
 
             await page.fill("input[name='AuthenticationFG.USER_PRINCIPAL']", user_id)
@@ -292,14 +282,7 @@ async def generate_report():
             page_content = await page.content()
             if "Welcome" not in page_content and "Dashboard" not in page_content:
                 await browser.close()
-                # Clean up files
-                for f in [captcha_file, csv_file, pdf_file]:
-                    if os.path.exists(f):
-                        pass
-                raise HTTPException(
-                    status_code=401,
-                    detail="Login failed - check credentials or CAPTCHA",
-                )
+                raise RuntimeError("Login failed - check credentials or CAPTCHA")
 
             # Navigate to RD Account List page
             await page.get_by_role("link", name="Accounts").click()
@@ -320,24 +303,75 @@ async def generate_report():
                 os.remove(csv_file)
 
             if not pdf_file or not os.path.exists(pdf_file):
-                raise HTTPException(status_code=500, detail="Failed to generate PDF")
+                raise RuntimeError("Failed to generate PDF")
 
-            # Return PDF file
-            return FileResponse(
-                pdf_file,
-                media_type="application/pdf",
-                filename=f"rd_deposit_report_{timestamp}.pdf",
-                background=None,
-            )
+            # Send report to Telegram
+            try:
+                await send_report(
+                    pdf_file, caption=f"📄 RD Deposit Report - {timestamp}"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send report to Telegram: {e}")
 
-    except HTTPException:
-        raise
-    except Exception as e:
+            return pdf_file
+
+    except Exception:
         # Clean up files on error
         for f in [captcha_file, csv_file, pdf_file]:
             if os.path.exists(f):
                 os.remove(f)
+        raise
+
+
+@app.get("/generate-report")
+async def generate_report():
+    """
+    Generate RD account report with automatic CAPTCHA solving.
+
+    Returns PDF report directly.
+    """
+    try:
+        pdf_file = await _run_report_generation()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return FileResponse(
+            pdf_file,
+            media_type="application/pdf",
+            filename=f"rd_deposit_report_{timestamp}.pdf",
+            background=None,
+        )
+    except TimeoutError:
+        raise HTTPException(
+            status_code=408,
+            detail="CAPTCHA response timed out. Please try again and reply to the Telegram message within 120 seconds.",
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+async def _telegram_report_handler():
+    """Called when /report command is received from Telegram."""
+    pdf_file = await _run_report_generation()
+    # Clean up PDF after sending (already sent to Telegram inside _run_report_generation)
+    if pdf_file and os.path.exists(pdf_file):
+        os.remove(pdf_file)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Start the Telegram command listener on app startup."""
+    import asyncio
+
+    if os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_CHAT_ID"):
+        asyncio.create_task(poll_for_commands(_telegram_report_handler))
+        logger.info(
+            "Telegram bot listener started — send /report to trigger report generation"
+        )
+    else:
+        logger.warning(
+            "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set — Telegram bot commands disabled"
+        )
 
 
 if __name__ == "__main__":
