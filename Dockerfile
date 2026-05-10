@@ -44,6 +44,7 @@ RUN playwright install-deps chromium || true
 
 # Copy application files
 COPY main.py .
+COPY telegram_captcha.py .
 
 # Modify the script to use Playwright's Chromium instead of system Chrome in Docker
 RUN sed -i 's/channel="chrome"//' main.py
@@ -54,6 +55,8 @@ RUN mkdir -p /app/output
 # Set environment variables (override these when running the container)
 ENV INDIA_POST_USER="DOP.MIG0017258"
 ENV INDIA_POST_PASS="BaskaranJamuna@73"
+ENV TELEGRAM_BOT_TOKEN=""
+ENV TELEGRAM_CHAT_ID=""
 
 # Expose FastAPI port
 EXPOSE 8000
